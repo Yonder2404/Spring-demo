@@ -1,0 +1,65 @@
+stages:
+  - build
+  - package
+  - deploy
+
+maven-build:
+  image: maven:3-jdk-8
+  stage: build
+  script: "mvn package -B"
+  artifacts:
+    paths:
+      - target/*.jar
+
+Imgen_Build:
+  stage: package
+  image: docker:19.03.0-dind
+  services:
+    - docker:19.03.0-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    DOCKER_HOST: tcp://localhost:2375/
+    CONTAINER_IMAGE: devsecops/springboot:$CI_COMMIT_SHORT_SHA
+  before_script:
+    - echo 10.48.128.16 registry-devsecops.intelix.biz > /etc/hosts
+    - cat /etc/hosts
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWD $CI_REGISTRY_URL
+  script:
+    - docker build -t "$CONTAINER_IMAGE" .
+    - docker tag $CONTAINER_IMAGE registry-devsecops.intelix.biz/$CONTAINER_IMAGE 
+    - docker push registry-devsecops.intelix.biz/$CONTAINER_IMAGE    
+
+Namespaces:
+  stage: deploy
+  image: bitnami/kubectl
+  script:
+    - ls
+    - kubectl apply -f namespace.yml
+
+Secret:
+  stage: deploy
+  image: roffe/kubectl
+  before_script:
+    - kubectl create secret docker-registry registry-secret --dry-run=true $secret_name --namespace=hello-kubernetes --docker-server=https://registry-devsecops.intelix.biz --docker-email=yperez@intelix.biz --docker-username=devsecops --docker-password=devsecops -o yaml > registry-secret.yaml
+    - cat registry-secret.yaml
+    - echo 10.48.128.16 registry-devsecops.intelix.biz >> /etc/hosts
+  script:
+    - ls
+    - kubectl apply -f registry-secret.yaml
+
+Deployment:
+  stage: deploy
+  image: roffe/kubectl
+  before_script:
+    - echo 10.48.128.16 registry-devsecops.intelix.biz >> /etc/hosts
+  script:
+    - sed -i "s/<VERSION>/${CI_COMMIT_SHORT_SHA}/g" deployment.yml
+    - kubectl apply -f deployment.yml
+
+Service:
+  stage: deploy
+  image: roffe/kubectl
+  before_script:
+    - echo 10.48.128.16 registry-devsecops.intelix.biz >> /etc/hosts
+  script:
+    - kubectl apply -f service.yml
